@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zabek Web IDE - Programación por Saltos</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@400;700&display=swap');
+        
+        body { font-family: 'Inter', sans-serif; background: #0f172a; color: #e2e8f0; }
+        .code-editor { font-family: 'Fira Code', monospace; resize: none; tab-size: 4; }
+        .terminal { font-family: 'Fira Code', monospace; background: #000; color: #00ff00; overflow-y: auto; border-radius: 4px; border: 1px solid #1e293b; }
+        .terminal-input { background: transparent; border: none; color: #00ff00; outline: none; width: 100%; font-family: 'Fira Code', monospace; }
+        
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 10px; }
+        
+        .glow-input {
+            box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-slate-800 border-b border-slate-700 p-4 flex justify-between items-center shadow-lg z-10">
+        <div class="flex items-center space-x-3">
+            <div class="bg-indigo-600 p-2 rounded-lg text-white">
+                <i class="fas fa-terminal text-xl"></i>
+            </div>
+            <div>
+                <h1 class="text-xl font-bold tracking-tight leading-none">ZABEK <span class="text-indigo-400">v3.5.0</span></h1>
+                <p class="text-[10px] text-slate-400 uppercase tracking-widest mt-1">Web IDE Oficial</p>
+            </div>
+        </div>
+        <div class="flex space-x-2">
+            <button id="btn-run" onclick="runCode()" class="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-md font-bold transition flex items-center shadow-md active:scale-95">
+                <i class="fas fa-play mr-2"></i> EJECUTAR
+            </button>
+            <button onclick="saveCode()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-md transition shadow-md flex items-center active:scale-95">
+                <i class="fas fa-save mr-2"></i> GUARDAR
+            </button>
+            <button onclick="clearConsole()" class="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-md transition shadow-md">
+                <i class="fas fa-eraser"></i>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex flex-col md:flex-row overflow-hidden">
+        
+        <!-- Editor Section -->
+        <div class="w-full md:w-1/2 flex flex-col border-r border-slate-700 bg-slate-900">
+            <div class="bg-slate-900/50 px-4 py-2 text-xs font-bold uppercase tracking-widest text-slate-500 border-b border-slate-800 flex justify-between items-center">
+                <span>EDITOR (archivo.zak)</span>
+                <span class="text-[10px] text-indigo-500/50">Zabek v3 Syntax</span>
+            </div>
+            <textarea id="editor" class="code-editor flex-1 w-full p-6 bg-slate-900 outline-none text-indigo-300 text-sm leading-relaxed" spellcheck="false">; --- PRUEBA DE SISTEMA ZABEK ---
+store nombre, "Usuario"
+alert("Cargando motor...")
+
+mark inicio
+    input nombre, "¿Cual es tu nombre?"
+    alert("Hola, ", nombre, ". ¡El input funciona!")
+    
+    input confirmacion, "¿Quieres probar otra vez? (si/no)"
+    if confirmacion == "si"
+        jump inicio
+    endif
+
+alert("Saliendo del sistema...")
+alert("¡Fin!")</textarea>
+        </div>
+
+        <!-- Terminal Section -->
+        <div class="w-full md:w-1/2 flex flex-col bg-black">
+            <div class="bg-slate-900 px-4 py-2 text-xs font-bold uppercase tracking-widest text-slate-500 border-b border-slate-800">
+                CONSOLA DE SALIDA
+            </div>
+            <div id="terminal" class="terminal flex-1 p-6 text-sm leading-7">
+                <div class="text-slate-600 italic mb-2">Presiona EJECUTAR para iniciar el programa...</div>
+            </div>
+            <!-- Input Area -->
+            <div id="input-container" class="bg-slate-900 border-t border-slate-800 p-4 flex items-center hidden glow-input">
+                <span class="text-emerald-500 mr-3 font-bold animate-pulse">>></span>
+                <input type="text" id="term-input" class="terminal-input" placeholder="Escribe y presiona Enter..." autocomplete="off">
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const terminal = document.getElementById('terminal');
+        const termInput = document.getElementById('term-input');
+        const inputContainer = document.getElementById('input-container');
+        const editor = document.getElementById('editor');
+        
+        let variables = {};
+        let marcasGlobales = {};
+        let funciones = {};
+        let lineasCodigo = [];
+        let ptr = 0;
+        let estaCorriendo = false;
+        let esperandoInput = false;
+        let variableInputActual = "";
+
+        function log(msg, color = "") {
+            const div = document.createElement('div');
+            if (color) div.style.color = color;
+            div.textContent = msg;
+            terminal.appendChild(div);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        function clearConsole() {
+            terminal.innerHTML = "";
+            log("Consola limpia.", "#475569");
+        }
+
+        function saveCode() {
+            const blob = new Blob([editor.value], { type: 'text/plain' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'programa.zak';
+            a.click();
+            log("[SISTEMA] Código guardado en programa.zak", "#6366f1");
+        }
+
+        function runCode() {
+            // Reset total
+            variables = {};
+            marcasGlobales = {};
+            funciones = {};
+            lineasCodigo = editor.value.split('\n');
+            ptr = 0;
+            estaCorriendo = true;
+            esperandoInput = false;
+            terminal.innerHTML = "";
+            inputContainer.classList.add('hidden');
+            
+            log("[INICIANDO EJECUCIÓN]", "#10b981");
+            
+            // Pre-escaneo de Marcas
+            for (let i = 0; i < lineasCodigo.length; i++) {
+                let l = lineasCodigo[i].trim();
+                if (l.startsWith("mark ")) {
+                    marcasGlobales[l.substring(5).trim()] = i;
+                }
+                if (l.startsWith("func ")) {
+                    let nombreF = l.substring(5).replace("()", "").trim();
+                    let finF = i;
+                    while (finF < lineasCodigo.length && lineasCodigo[finF].trim() !== "endfunc") finF++;
+                    funciones[nombreF] = lineasCodigo.slice(i + 1, finF);
+                }
+            }
+
+            pasoAEjecutar();
+        }
+
+        function evaluarValor(v) {
+            v = v.trim();
+            if (!v) return "";
+            if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+                return v.substring(1, v.length - 1);
+            }
+            if (v.startsWith("rand(")) {
+                let p = v.substring(5, v.length - 1).split(",");
+                let min = parseInt(evaluarValor(p[0]));
+                let max = parseInt(evaluarValor(p[1]));
+                return Math.floor(Math.random() * (max - min + 1)) + min;
+            }
+            
+            // Reemplazo de variables antes de eval
+            let procesado = v;
+            // Ordenar llaves por longitud descendente para evitar que 'hp_max' sea reemplazado parcialmente por 'hp'
+            const keys = Object.keys(variables).sort((a,b) => b.length - a.length);
+            for (let k of keys) {
+                let re = new RegExp("\\b" + k + "\\b", "g");
+                procesado = procesado.replace(re, variables[k]);
+            }
+
+            try {
+                // Si parece una operación matemática
+                if (/[\+\-\*\/]/.test(procesado)) return eval(procesado);
+            } catch(e) {}
+
+            return variables.hasOwnProperty(v) ? variables[v] : v;
+        }
+
+        function pasoAEjecutar() {
+            if (!estaCorriendo || esperandoInput) return;
+
+            while (ptr < lineasCodigo.length) {
+                let lineaOriginal = lineasCodigo[ptr];
+                let linea = lineaOriginal.trim();
+
+                // Ignorar vacíos, comentarios o cierres de bloques
+                if (!linea || linea.startsWith(";") || linea.startsWith("endfunc")) {
+                    ptr++;
+                    continue;
+                }
+
+                // Si chocamos con una marca sin que sea por un jump, la ignoramos y seguimos
+                if (linea.startsWith("mark ")) {
+                    ptr++;
+                    continue;
+                }
+                
+                // Saltar definiciones de funciones
+                if (linea.startsWith("func ")) {
+                    while (ptr < lineasCodigo.length && lineasCodigo[ptr].trim() !== "endfunc") ptr++;
+                    ptr++;
+                    continue;
+                }
+
+                if (linea.startsWith("alert(")) {
+                    let cont = linea.substring(6, linea.length - 1);
+                    let partes = [], actual = "", comillas = false;
+                    for(let char of cont) {
+                        if(char === '"' || char === "'") comillas = !comillas;
+                        if(char === ',' && !comillas) { partes.push(actual); actual = ""; } else actual += char;
+                    }
+                    partes.push(actual);
+                    log(partes.map(p => evaluarValor(p)).join(""));
+                }
+                else if (linea.startsWith("store ")) {
+                    let idxComa = linea.indexOf(",");
+                    let nom = linea.substring(6, idxComa).trim();
+                    let val = linea.substring(idxComa + 1).trim();
+                    variables[nom] = evaluarValor(val);
+                }
+                else if (linea.startsWith("jump ")) {
+                    let dest = linea.substring(5).trim();
+                    if (marcasGlobales.hasOwnProperty(dest)) {
+                        ptr = marcasGlobales[dest] + 1;
+                        continue;
+                    } else {
+                        log("[ERROR] Marca no encontrada: " + dest, "#ef4444");
+                    }
+                }
+                else if (linea.startsWith("call ")) {
+                    let f = linea.substring(5).replace("()", "").trim();
+                    if (funciones.hasOwnProperty(f)) {
+                        lineasCodigo.splice(ptr + 1, 0, ...funciones[f]);
+                    }
+                }
+                else if (linea.startsWith("input ")) {
+                    let idxComa = linea.indexOf(",");
+                    variableInputActual = linea.substring(6, idxComa).trim();
+                    let msg = linea.substring(idxComa + 1).replace(/['"]/g, '').trim();
+                    
+                    log(msg || "Escribe un valor:");
+                    
+                    esperandoInput = true;
+                    inputContainer.classList.remove('hidden');
+                    termInput.value = "";
+                    setTimeout(() => termInput.focus(), 10);
+                    return; // Detener bucle para esperar
+                }
+                else if (linea.startsWith("if ")) {
+                    let cond = linea.substring(3).trim();
+                    let depth = 1, finIf = ptr + 1;
+                    while (finIf < lineasCodigo.length && depth > 0) {
+                        if (lineasCodigo[finIf].trim().startsWith("if ")) depth++;
+                        if (lineasCodigo[finIf].trim() === "endif") depth--;
+                        if (depth > 0) finIf++;
+                    }
+
+                    let esVerdad = false;
+                    let op = ["==", "!=", "<=", ">=", "<", ">"].find(o => cond.includes(o));
+                    if (op) {
+                        let partes = cond.split(op);
+                        let v1 = evaluarValor(partes[0]), v2 = evaluarValor(partes[1]);
+                        if(op === "==") esVerdad = (v1 == v2);
+                        else if(op === "!=") esVerdad = (v1 != v2);
+                        else if(op === "<=") esVerdad = (v1 <= v2);
+                        else if(op === ">=") esVerdad = (v1 >= v2);
+                        else if(op === "<") esVerdad = (v1 < v2);
+                        else if(op === ">") esVerdad = (v1 > v2);
+                    } else {
+                        esVerdad = !!evaluarValor(cond);
+                    }
+
+                    if (!esVerdad) {
+                        ptr = finIf + 1;
+                        continue;
+                    }
+                }
+                else if (linea.startsWith("wait(")) {
+                    let ms = parseFloat(evaluarValor(linea.substring(5, linea.length - 1))) * 1000;
+                    esperandoInput = true;
+                    setTimeout(() => {
+                        esperandoInput = false;
+                        ptr++;
+                        pasoAEjecutar();
+                    }, ms);
+                    return;
+                }
+                else if (linea === "wipe") {
+                    terminal.innerHTML = "";
+                }
+
+                ptr++;
+            }
+
+            if (ptr >= lineasCodigo.length) {
+                estaCorriendo = false;
+                log("[FIN DE PROGRAMA]", "#64748b");
+            }
+        }
+
+        termInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && esperandoInput) {
+                let val = termInput.value;
+                // Guardar valor
+                variables[variableInputActual] = (isNaN(val) || val.trim() === "") ? val : parseFloat(val);
+                
+                log("> " + val, "#10b981");
+                
+                // Reset UI
+                inputContainer.classList.add('hidden');
+                esperandoInput = false;
+                termInput.value = "";
+                
+                // Continuar
+                ptr++;
+                pasoAEjecutar();
+            }
+        });
+
+        // Re-enfocar si el usuario hace clic en la terminal
+        terminal.addEventListener('click', () => {
+            if (esperandoInput) termInput.focus();
+        });
+    </script>
+</body>
+</html>
